@@ -2,13 +2,20 @@ import logging
 import os
 import threading
 import time
+import random
+import string
 
 import aria2p
 import telegram.ext as tg
 from dotenv import load_dotenv
+from pyrogram import Client
+from telegraph import Telegraph
+
 import socket
 import faulthandler
 faulthandler.enable()
+from megasdkrestclient import MegaSdkRestClient, errors as mega_err
+import subprocess
 
 socket.setdefaulttimeout(600)
 
@@ -67,35 +74,64 @@ if os.path.exists('authorized_chats.txt'):
             #    LOGGER.info(line.split())
             AUTHORIZED_CHATS.add(int(line.split()[0]))
 try:
+    achats = getConfig('AUTHORIZED_CHATS')
+    achats = achats.split(" ")
+    for chats in achats:
+        AUTHORIZED_CHATS.add(int(chats))
+except:
+    pass
+
+try:
     BOT_TOKEN = getConfig('BOT_TOKEN')
     parent_id = getConfig('GDRIVE_FOLDER_ID')
-    telegraph_token = getConfig('TELEGRAPH_TOKEN')
     DOWNLOAD_DIR = getConfig('DOWNLOAD_DIR')
-    if DOWNLOAD_DIR[-1] != '/' or DOWNLOAD_DIR[-1] != '\\':
+    if not DOWNLOAD_DIR.endswith("/"):
         DOWNLOAD_DIR = DOWNLOAD_DIR + '/'
     DOWNLOAD_STATUS_UPDATE_INTERVAL = int(getConfig('DOWNLOAD_STATUS_UPDATE_INTERVAL'))
     OWNER_ID = int(getConfig('OWNER_ID'))
     AUTO_DELETE_MESSAGE_DURATION = int(getConfig('AUTO_DELETE_MESSAGE_DURATION'))
-    USER_SESSION_STRING = getConfig('USER_SESSION_STRING')
     TELEGRAM_API = getConfig('TELEGRAM_API')
     TELEGRAM_HASH = getConfig('TELEGRAM_HASH')
 except KeyError as e:
     LOGGER.error("One or more env variables missing! Exiting now")
     exit(1)
 
+LOGGER.info("Generating USER_SESSION_STRING")
+app = Client(':memory:', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, bot_token=BOT_TOKEN)
+
+#Generate Telegraph Token
+sname = ''.join(random.SystemRandom().choices(string.ascii_letters, k=8))
+LOGGER.info("Generating Telegraph Token using '" + sname + "' name")
+telegraph = Telegraph()
+telegraph.create_account(short_name=sname)
+telegraph_token = telegraph.get_access_token()
+LOGGER.info("Telegraph Token Generated: '" + telegraph_token + "'")
+
 try:
-    MEGA_API_KEY = getConfig('MEGA_API_KEY')
+    MEGA_KEY = getConfig('MEGA_KEY')
+
 except KeyError:
-    logging.warning('MEGA API KEY not provided!')
-    MEGA_API_KEY = None
-try:
-    MEGA_EMAIL_ID = getConfig('MEGA_EMAIL_ID')
-    MEGA_PASSWORD = getConfig('MEGA_PASSWORD')
-    if len(MEGA_EMAIL_ID) == 0 or len(MEGA_PASSWORD) == 0:
-        raise KeyError
-except KeyError:
-    logging.warning('MEGA Credentials not provided!')
-    MEGA_EMAIL_ID = None
+    MEGA_KEY = None
+    LOGGER.info('MEGA API KEY NOT AVAILABLE')
+if MEGA_KEY is not None:
+    try:
+        MEGA_USERNAME = getConfig('MEGA_USERNAME')
+        MEGA_PASSWORD = getConfig('MEGA_PASSWORD')
+        # Start megasdkrest binary
+        subprocess.Popen(["megasdkrest", "--apikey", MEGA_KEY])
+        time.sleep(3)
+        mega_client = MegaSdkRestClient('http://localhost:6090')
+        try:
+            mega_client.login(MEGA_USERNAME, MEGA_PASSWORD)
+        except mega_err.MegaSdkRestClientException as e:
+            logging.error(e.message['message'])
+            exit(0)
+    except KeyError:
+        LOGGER.info("Mega API KEY provided but credentials not provided. Starting mega in anonymous mode!")
+        MEGA_USERNAME = None
+        MEGA_PASSWORD = None
+else:
+    MEGA_USERNAME = None
     MEGA_PASSWORD = None
 try:
     INDEX_URL = getConfig('INDEX_URL')
@@ -171,6 +207,6 @@ except KeyError:
     SHORTENER = None
     SHORTENER_API = None
 
-updater = tg.Updater(token=BOT_TOKEN,use_context=True)
+updater = tg.Updater(token=BOT_TOKEN)
 bot = updater.bot
 dispatcher = updater.dispatcher
